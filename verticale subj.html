@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SVV — Verticale Subjective v3e (FS + exports)</title>
+<style>
+  :root { --bg:#0b0c0f; --fg:#f2f5f7; --muted:#aab4c0; --grid:rgba(255,255,255,.15); --accent:#00e5ff; --ok:#22c55e; --warn:#f59e0b; --danger:#ff6b6b; --vh: 1vh; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; overscroll-behavior:none}
+  #app{display:grid;grid-template-rows:auto auto 1fr auto;height:100%}
+  header,footer{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--grid)}
+  .tabs{display:flex;gap:8px;padding:8px 14px;border-bottom:1px solid var(--grid);flex-wrap:wrap}
+  .tab{padding:8px 12px;border:1px solid var(--grid);border-radius:10px;color:var(--muted);cursor:pointer}
+  .tab.active{color:var(--fg);border-color:var(--accent)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 14px}
+  .btn{border:1px solid var(--grid);background:rgba(255,255,255,.06);color:var(--fg);padding:8px 12px;border-radius:12px;cursor:pointer;font-weight:600}
+  .btn.success{border-color:var(--ok)} .btn.warn{border-color:var(--warn)} .btn.danger{border-color:var(--danger)}
+  label.badge{font-size:12px;color:var(--muted);border:1px solid var(--grid);border-radius:999px;padding:4px 8px}
+  input[type=number],input[type=text]{background:transparent;color:var(--fg);border:1px solid var(--grid);border-radius:8px;padding:4px 6px}
+  main{position:relative;margin:10px;border:1px dashed var(--grid);border-radius:14px;overflow:hidden;display:grid;place-items:center;min-height:50vh}
+  canvas{width:100%;height:100%;display:block;background:radial-gradient(60% 40% at 50% 50%,rgba(255,255,255,0.03),rgba(0,0,0,0));touch-action:none}
+  .hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted);background:rgba(0,0,0,.35);padding:6px 10px;border-radius:999px;border:1px solid var(--grid)}
+  .toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);border:1px solid var(--grid);padding:8px 12px;border-radius:10px;font-size:13px;color:#dbeafe;display:none}
+  .panel{display:none} .panel.active{display:block}
+  table.grid{width:100%;border-collapse:collapse;margin:6px 14px 14px}
+  .grid th,.grid td{border:1px solid var(--grid);padding:6px 8px;font-size:13px} .grid th{color:var(--muted);text-align:left}
+  footer small{color:var(--muted)}
+  /* Mode clinique */
+  .clinical header, .clinical .tabs, .clinical .panel, .clinical footer { display:none; }
+  .clinical main { margin:0; border:none; border-radius:0; }
+  .clinical .hint { display:none; }
+  /* Pseudo plein écran (fallback iOS Safari) */
+  .pseudoFS { overflow:hidden; }
+  .pseudoFS #app { grid-template-rows: 0 0 1fr 0; }
+  .pseudoFS main { position:fixed; inset:0; width:100vw; height:calc(var(--vh)*100); margin:0; border:none; border-radius:0; }
+  .pseudoFS .hint { display:none; }
+  /* Plein écran natif */
+  .fs main { margin:0; border:none; border-radius:0; width:100svw; height:100svh; }
+  .fs .hint { display:none; }
+  /* Bouton FS sur la scène */
+  .fsPrompt { position:absolute; inset:auto 10px 10px auto; z-index:5; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <strong>SVV — Verticale Subjective v3e</strong>
+    <div class="row">
+      <span class="badge" style="font-size:12px;color:var(--muted)">←/→ ±1° • Shift+←/→ ±0,1° • Entrée valider • N nouveau • <b>F</b> FS+clinique • V (maintenir) / T (toggle) verticale vraie</span>
+      <button class="btn" id="fsBtn">Plein écran (F)</button>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="config">Configuration</div>
+    <div class="tab" data-tab="journal">Journal</div>
+  </div>
+
+  <section class="panel active" id="panel-config">
+    <div class="row">
+      <label class="badge"><input type="checkbox" id="showRefChk"> Afficher la verticale (test)</label>
+      <label class="badge">Angle° <input type="number" id="angleNum" step="0.1" value="0" style="width:90px"></label>
+      <button class="btn" id="reset0">0°</button>
+      <button class="btn" id="newTrial">Nouveau essai (±25°)</button>
+      <button class="btn success" id="validate">Valider (Entrée)</button>
+    </div>
+    <div class="row">
+      <label class="badge">Patient <input type="text" id="patient" placeholder="Nom / ID" style="width:200px"></label>
+      <label class="badge">Note <input type="text" id="note" placeholder="Commentaires de l'essai" style="width:260px"></label>
+      <button class="btn" id="saveNote">Enregistrer note</button>
+    </div>
+    <div class="row">
+      <label class="badge"><input type="checkbox" id="squareChk"> Carré-leurre</label>
+      <label class="badge">Orient° <input type="number" id="squareAngle" step="1" value="0" style="width:80px"></label>
+      <label class="badge">Taille % <input type="number" id="squareSize" step="1" min="10" max="80" value="30" style="width:80px"></label>
+      <label class="badge">Opacité <input type="number" id="squareAlpha" step="0.05" min="0" max="1" value="0.9" style="width:80px"></label>
+      <button class="btn warn" id="randSquare">Orientation aléatoire</button>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-journal">
+    <div class="row">
+      <button class="btn" id="exportHtml">Exporter (onglet copie→Excel)</button>
+      <button class="btn" id="exportXls">Télécharger Excel (.xls)</button>
+      <button class="btn" id="exportCsv">Télécharger CSV</button>
+      <button class="btn danger" id="clearJournal">Vider Journal</button>
+      <span class="badge">Essais: <span id="trialCount">0</span></span>
+      <span class="badge">Dernier écart: <span id="lastError">—</span>°</span>
+      <span class="badge">Moyenne |écart|: <span id="meanAbs">—</span>°</span>
+      <span class="badge">ÉT |écart|: <span id="sdAbs">—</span>°</span>
+    </div>
+    <table class="grid">
+      <thead><tr><th>Date/Heure</th><th>Patient</th><th>Angle (°)</th><th>|Angle| (°)</th><th>Note</th></tr></thead>
+      <tbody id="journalBody"></tbody>
+    </table>
+  </section>
+
+  <main id="stage">
+    <button class="btn fsPrompt" id="stageFsBtn" title="Plein écran">⛶</button>
+    <canvas id="cv" tabindex="0" aria-label="Zone de test"></canvas>
+    <div class="hint">Glisser pour tourner • En FS/clinique : plein écran • V (maintenir) / T (toggle) : verticale vraie</div>
+    <div class="toast" id="toast">—</div>
+  </main>
+
+  <footer>
+    <small id="status">Prêt</small>
+    <small>Compat : desktop • tablette • mobile</small>
+  </footer>
+</div>
+
+<script>
+(function(){
+  const app = document.getElementById('app');
+  const stage = document.getElementById('stage');
+  const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+  const status = document.getElementById('status');
+  const toastEl = document.getElementById('toast');
+  const tabs = document.querySelectorAll('.tab');
+  const panelConfig = document.getElementById('panel-config');
+  const panelJournal = document.getElementById('panel-journal');
+  const fsBtn = document.getElementById('fsBtn');
+  const stageFsBtn = document.getElementById('stageFsBtn');
+  const angleNum = document.getElementById('angleNum');
+  const reset0 = document.getElementById('reset0');
+  const newTrialBtn = document.getElementById('newTrial');
+  const validateBtn = document.getElementById('validate');
+  const showRefChk = document.getElementById('showRefChk');
+  const squareChk = document.getElementById('squareChk');
+  const squareAngle = document.getElementById('squareAngle');
+  const squareSize = document.getElementById('squareSize');
+  const squareAlpha = document.getElementById('squareAlpha');
+  const randSquare = document.getElementById('randSquare');
+  const clearJournal = document.getElementById('clearJournal');
+  const exportHtml = document.getElementById('exportHtml');
+  const exportXls = document.getElementById('exportXls');
+  const exportCsv = document.getElementById('exportCsv');
+  const journalBody = document.getElementById('journalBody');
+  const trialCount = document.getElementById('trialCount');
+  const lastError = document.getElementById('lastError');
+  const meanAbs = document.getElementById('meanAbs');
+  const sdAbs = document.getElementById('sdAbs');
+  const patient = document.getElementById('patient');
+  const note = document.getElementById('note');
+  const saveNote = document.getElementById('saveNote');
+
+  const st = { angle:0, dragging:false, startA:0, startM:0, clinical:false, showRef:false,
+               square:false, squareDeg:0, squareSizePct:30, squareAlpha:0.9, trials:[], lastValTs:0 };
+
+  // Viewport height fix (iOS) for pseudoFS
+  function setVH(){ const vh = (window.visualViewport ? visualViewport.height : window.innerHeight) * 0.01; document.documentElement.style.setProperty('--vh', vh + 'px'); }
+  setVH(); window.addEventListener('resize', setVH); window.addEventListener('orientationchange', setVH);
+
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
+  function toast(msg,ms=1200){ toastEl.textContent=msg; toastEl.style.display='block'; clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.style.display='none',ms); }
+  const isFS = ()=>!!(document.fullscreenElement || document.webkitFullscreenElement);
+
+  tabs.forEach(t=>t.addEventListener('click',()=>{
+    tabs.forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const tab = t.dataset.tab;
+    panelConfig.classList.toggle('active', tab==='config');
+    panelJournal.classList.toggle('active', tab==='journal');
+    setTimeout(resize, 0);
+  }));
+
+  function resize(){
+    const dpr=window.devicePixelRatio||1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = Math.max(1, Math.floor(w*dpr));
+    cv.height = Math.max(1, Math.floor(h*dpr));
+    draw();
+  }
+
+  function setAngle(a){ while(a>180)a-=360; while(a<-180)a+=360; st.angle = clamp(a,-90,90); angleNum.value = st.angle.toFixed(1); draw(); }
+  angleNum.addEventListener('input', ()=> setAngle(parseFloat(angleNum.value||0)) );
+
+  function posAngle(ev){
+    const r=cv.getBoundingClientRect();
+    const x=(ev.touches?ev.touches[0].clientX:ev.clientX)-r.left-r.width/2;
+    const y=(ev.touches?ev.touches[0].clientY:ev.clientY)-r.top-r.height/2;
+    return deg(Math.atan2(x,-y));
+  }
+  function mdown(ev){ st.dragging=true; st.startA=st.angle; st.startM=posAngle(ev); ev.preventDefault && ev.preventDefault(); }
+  function mmove(ev){ if(!st.dragging) return; const d=posAngle(ev)-st.startM; setAngle(st.startA+d); }
+  function mup(){ st.dragging=false; }
+  cv.addEventListener('mousedown', mdown); window.addEventListener('mousemove', mmove); window.addEventListener('mouseup', mup);
+  cv.addEventListener('touchstart', mdown, {passive:false}); window.addEventListener('touchmove', mmove, {passive:false}); window.addEventListener('touchend', mup);
+
+  function draw(){
+    const w=cv.width, h=cv.height, cx=w/2, cy=h/2;
+    const lw = Math.max(6, Math.min(w,h)/140);
+    ctx.clearRect(0,0,w,h);
+
+    if(st.showRef){
+      ctx.save(); ctx.translate(cx,cy);
+      ctx.strokeStyle='rgba(255,0,0,0.95)'; ctx.lineWidth=Math.max(2,Math.min(w,h)/300);
+      ctx.setLineDash([12,10]); ctx.beginPath(); ctx.moveTo(0,-h); ctx.lineTo(0,h); ctx.stroke(); ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    if(st.square){
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(rad(st.squareDeg));
+      const side=Math.min(w,h)*(st.squareSizePct/100);
+      ctx.globalAlpha=clamp(st.squareAlpha,0,1);
+      ctx.lineWidth=Math.max(4,Math.min(w,h)/180); ctx.strokeStyle='rgba(255,255,255,0.95)';
+      ctx.strokeRect(-side/2,-side/2,side,side);
+      ctx.globalAlpha=1; ctx.restore();
+    }
+
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(rad(st.angle));
+    ctx.strokeStyle='white'; ctx.lineCap='round'; ctx.lineWidth=lw;
+    ctx.beginPath(); ctx.moveTo(0,-h*0.45); ctx.lineTo(0,h*0.45); ctx.stroke();
+    ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(0,0, Math.max(6,Math.min(w,h)/160), 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    status.textContent='Angle: '+st.angle.toFixed(1)+'°';
+  }
+
+  document.addEventListener('keydown',(e)=>{
+    const tag = (document.activeElement && document.activeElement.tagName || '').toUpperCase();
+    const inEditable = tag==='INPUT' || tag==='TEXTAREA';
+    if(e.key==='ArrowLeft'){ e.preventDefault(); setAngle(st.angle-(e.shiftKey?0.1:1)); }
+    else if(e.key==='ArrowRight'){ e.preventDefault(); setAngle(st.angle+(e.shiftKey?0.1:1)); }
+    else if(e.key.toLowerCase()==='n' && !inEditable){ const start=(Math.random()*50-25); setAngle(start); toast('Nouveau essai — départ '+start.toFixed(1)+'°'); }
+    else if(e.key.toLowerCase()==='r' && !inEditable){ setAngle(0); }
+    else if(e.key.toLowerCase()==='f'){ e.preventDefault(); toggleFSClinique(); }
+    else if(e.key==='Enter' && !inEditable){ validate(); }
+    else if(e.key.toLowerCase()==='v'){ st.showRef=true; draw(); }
+    else if(e.key.toLowerCase()==='t' && !inEditable){ st.showRef=!st.showRef; draw(); toast(st.showRef?'Référence ON':'Référence OFF'); }
+  });
+  document.addEventListener('keyup',(e)=>{ if(e.key.toLowerCase()==='v'){ st.showRef=false; draw(); } });
+
+  // right-click ref in clinical
+  cv.addEventListener('contextmenu', e=>e.preventDefault());
+  cv.addEventListener('mousedown', e=>{ if(e.button===2 && st.clinical){ st.showRef=true; draw(); } });
+  window.addEventListener('mouseup', e=>{ if(e.button===2 && st.clinical){ st.showRef=false; draw(); } });
+
+  // Buttons
+  reset0.addEventListener('click', ()=> setAngle(0));
+  newTrialBtn.addEventListener('click', ()=>{ const start=(Math.random()*50-25); setAngle(start); toast('Nouveau essai — départ '+start.toFixed(1)+'°'); });
+  validateBtn.addEventListener('click', validate);
+  showRefChk.addEventListener('change', ()=>{ st.showRef=!!showRefChk.checked; draw(); });
+  squareChk.addEventListener('change', ()=>{ st.square=!!squareChk.checked; draw(); });
+  squareAngle.addEventListener('input', ()=>{ st.squareDeg=parseFloat(squareAngle.value||0); draw(); });
+  squareSize.addEventListener('input', ()=>{ st.squareSizePct=clamp(parseFloat(squareSize.value||30),10,80); draw(); });
+  squareAlpha.addEventListener('input', ()=>{ st.squareAlpha=clamp(parseFloat(squareAlpha.value||0.9),0,1); draw(); });
+  randSquare.addEventListener('click', ()=>{ const a=Math.round((Math.random()*360)-180); st.squareDeg=a; squareAngle.value=a; draw(); toast('Carré: '+a+'°'); });
+
+  fsBtn.addEventListener('click', toggleFSClinique);
+  stageFsBtn.addEventListener('click', toggleFSClinique);
+  cv.addEventListener('touchend', function tryFsOnce(){ toggleFSClinique(); cv.removeEventListener('touchend', tryFsOnce); }, {passive:true});
+
+  function enterNativeFS(){
+    const target = stage.requestFullscreen ? stage
+                  : (stage.webkitRequestFullscreen ? stage
+                  : (document.documentElement.requestFullscreen ? document.documentElement : null));
+    if(!target) throw new Error('API FS absente');
+    if(target.requestFullscreen) return target.requestFullscreen();
+    if(target.webkitRequestFullscreen) return target.webkitRequestFullscreen();
+    throw new Error('API FS non utilisable');
+  }
+  function exitNativeFS(){
+    if(document.exitFullscreen) return document.exitFullscreen();
+    if(document.webkitExitFullscreen) return document.webkitExitFullscreen();
+  }
+
+  function toggleFSClinique(){
+    if(isFS()){
+      exitNativeFS();
+      document.body.classList.remove('pseudoFS');
+      app.classList.remove('fs');
+      st.clinical = false; app.classList.remove('clinical');
+      setTimeout(resize,0);
+      return;
+    }
+    st.clinical = true; app.classList.add('clinical');
+    Promise.resolve().then(()=>enterNativeFS()).then(()=>{
+      app.classList.add('fs');
+      setTimeout(resize,0);
+    }).catch(()=>{
+      document.body.classList.add('pseudoFS');
+      setTimeout(resize,0);
+      toast('Plein écran simulé (iOS/limitation navigateur)');
+    });
+  }
+
+  ['fullscreenchange','webkitfullscreenchange','orientationchange'].forEach(evt=>document.addEventListener(evt,()=>{
+    if(isFS()){ app.classList.add('fs'); st.clinical = true; app.classList.add('clinical'); }
+    else { app.classList.remove('fs'); document.body.classList.remove('pseudoFS'); }
+    setTimeout(resize,0);
+  }));
+
+  // Journal + Stats
+  function validate(){
+    const now = (window.performance && performance.now) ? performance.now() : Date.now();
+    if(now - st.lastValTs < 400) return;
+    st.lastValTs = now;
+    const rec = { ts: Date.now(), patient:(patient.value||'').trim(), angle:+st.angle.toFixed(2), abs:+Math.abs(st.angle).toFixed(2), note:(note.value||'').trim() };
+    st.trials.push(rec); renderJournal();
+    toast(`Essai #${st.trials.length} — écart ${st.angle.toFixed(2)}° (|${Math.abs(st.angle).toFixed(2)}|°)`);
+  }
+  saveNote.addEventListener('click', ()=>{
+    if(!st.trials.length){ toast('Aucun essai à annoter'); return; }
+    st.trials[st.trials.length-1].note = (note.value||'').trim();
+    renderJournal(); toast('Note enregistrée');
+  });
+
+  function renderJournal(){
+    journalBody.innerHTML='';
+    st.trials.forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${new Date(r.ts).toLocaleString()}</td><td>${esc(r.patient)}</td><td>${r.angle.toFixed(2)}</td><td>${r.abs.toFixed(2)}</td><td>${esc(r.note)}</td>`;
+      journalBody.appendChild(tr);
+    });
+    const s = stats();
+    trialCount.textContent = s.n;
+    lastError.textContent = st.trials.length? st.trials[st.trials.length-1].angle.toFixed(2) : '—';
+    meanAbs.textContent = isFinite(s.mean)? s.mean.toFixed(2) : '—';
+    sdAbs.textContent = isFinite(s.sd)? s.sd.toFixed(2) : '—';
+  }
+  function stats(){
+    const A = st.trials.map(r=>r.abs), n=A.length;
+    if(!n) return {n:0, mean:NaN, sd:NaN};
+    const mean = A.reduce((a,b)=>a+b,0)/n;
+    const sd = Math.sqrt(A.reduce((s,v)=>s+(v-mean)*(v-mean),0)/n);
+    return {n, mean, sd};
+  }
+  function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  // Exports
+  exportHtml.addEventListener('click', ()=>{
+    const s = stats();
+    const head = ['Date/Heure','Patient','Angle (°)','|Angle| (°)','Note'];
+    const rows = st.trials.map(r=>[ new Date(r.ts).toLocaleString(), esc(r.patient), r.angle.toFixed(2), r.abs.toFixed(2), esc(r.note) ]);
+    const html = `
+      <html><head><meta charset="utf-8"><title>SVV — Export</title></head><body>
+      <h2>SVV — Export</h2>
+      <p><b>Essais</b>: ${s.n} &nbsp; | &nbsp; <b>Moyenne |écart|</b>: ${isFinite(s.mean)?s.mean.toFixed(2):'—'} ° &nbsp; | &nbsp; <b>Écart-type |écart|</b>: ${isFinite(s.sd)?s.sd.toFixed(2):'—'} °</p>
+      <table border="1" cellspacing="0" cellpadding="4">
+        <thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+      <p style="color:#555">Astuce : Ctrl/Cmd+A puis Ctrl/Cmd+C → collez dans Excel.</p>
+      </body></html>`;
+    const win = window.open('', '_blank');
+    if(win && win.document){ win.document.open(); win.document.write(html); win.document.close(); }
+    else { alert('Impossible d’ouvrir un nouvel onglet. Désactivez le bloqueur de pop-up.'); }
+  });
+
+  exportXls.addEventListener('click', ()=>{
+    try{
+      const s = stats();
+      const head = ['Date/Heure','Patient','Angle (°)','|Angle| (°)','Note'];
+      const rows = st.trials.map(r=>[ new Date(r.ts).toLocaleString(), esc(r.patient), r.angle.toFixed(2), r.abs.toFixed(2), esc(r.note) ]);
+      const html = `
+        <html><head><meta charset="utf-8"><title>SVV — Export</title></head><body>
+        <h2>SVV — Export</h2>
+        <p><b>Essais</b>: ${s.n} &nbsp; | &nbsp; <b>Moyenne |écart|</b>: ${isFinite(s.mean)?s.mean.toFixed(2):'—'} ° &nbsp; | &nbsp; <b>Écart-type |écart|</b>: ${isFinite(s.sd)?s.sd.toFixed(2):'—'} °</p>
+        <table border="1" cellspacing="0" cellpadding="4">
+          <thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+        </body></html>`;
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent||'');
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent||'') || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+      const blob = new Blob([html], {type: (isIOS||isSafari)? 'application/octet-stream' : 'application/vnd.ms-excel;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=makeFilename('xls');
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    }catch(e){
+      exportHtml.click();
+    }
+  });
+
+  exportCsv.addEventListener('click', ()=>{
+    const head = ['Date/Heure','Patient','Angle (°)','|Angle| (°)','Note'];
+    const rows = st.trials.map(r=>[ new Date(r.ts).toLocaleString(), r.patient, r.angle, r.abs, (r.note||'').replace(/"/g,'""') ]);
+    const csv = [head.join(','), ...rows.map(r=> r.map(x=> typeof x==='string'?`"${x}"`:x).join(','))].join('\n');
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent||'');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent||'') || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+    const type = (isIOS||isSafari) ? 'text/plain;charset=utf-8;' : 'text/csv;charset=utf-8;';
+    const blob = new Blob([csv], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=makeFilename('csv');
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  });
+
+  function makeFilename(ext){
+    const pad = n=>String(n).padStart(2,'0');
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+    const p = (patient.value||'').trim().replace(/[^A-Za-z0-9_-]+/g,'_') || 'patient';
+    return `SVV_${p}_${stamp}.${ext}`;
+  }
+
+  function validate(){
+    const now = (window.performance && performance.now) ? performance.now() : Date.now();
+    if(now - st.lastValTs < 400) return;
+    st.lastValTs = now;
+    const rec = { ts: Date.now(), patient:(patient.value||'').trim(), angle:+st.angle.toFixed(2), abs:+Math.abs(st.angle).toFixed(2), note:(note.value||'').trim() };
+    st.trials.push(rec); renderJournal();
+    toast(`Essai #${st.trials.length} — écart ${st.angle.toFixed(2)}° (|${Math.abs(st.angle).toFixed(2)}|°)`);
+  }
+
+  function init(){
+    resize(); window.addEventListener('resize', ()=>{ resize(); }, {passive:true});
+    setAngle(0);
+    cv.focus && cv.focus();
+  }
+  window.addEventListener('load', init);
+})();
+</script>
+</body>
+</html>
